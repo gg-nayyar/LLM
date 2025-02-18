@@ -39,7 +39,7 @@ def generate_answer(query_text: str):
 
     # try:
     response = ollama.chat(
-        model="llama2",
+        model="llama2:7b",
         messages=[{"role": "system", "content": prompt}],
     )
     return response["message"]["content"]
