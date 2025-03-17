@@ -1,51 +1,69 @@
-import ollama
-# import os
-import chromadb
-from dotenv import load_dotenv
+import google.generativeai as genai
+from fastapi import FastAPI
+from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+import os
+import datetime
 
-load_dotenv()
-# api_key = os.environ.get("API_KEY")
+os.environ["API_KEY"] = "AIzaSyDG5tTiF6-1n1dHL7MB5P92uU3NCOcB3XY"
+genai.configure(api_key=os.getenv("API_KEY"))
 
-# if not api_key:
-#     raise ValueError("API_KEY is missing. Please set it in the .env file.")
+app = FastAPI()
 
-# client = openai.OpenAI(api_key=api_key)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-chroma_client = chromadb.PersistentClient(path='./db')
-collection = chroma_client.get_or_create_collection('legal_docs')
+class QueryRequest(BaseModel):
+    question: str
 
-def query_database(query_text: str):
-    results = collection.query(
-        query_texts=[query_text],
-        n_results=1
-    )
-    return results["documents"][0] if results["documents"] else None
-def generate_answer(query_text: str):
-    relevant_text = query_database(query_text)
-    if not relevant_text:
-        return "❌ No relevant legal documents found. Please refine your query."
+model = genai.GenerativeModel("gemini-1.5-flash")
 
-    prompt = f"""
-    You are a legal expert. Answer the following question using the provided legal text:
-    
-    Legal Text:
-    {relevant_text}
+@app.post("/ask")
+async def ask_query(query: QueryRequest):
+    try:
+        system_prompt = """
+        You are an AI-powered **Legal Consultant** specialized in Indian law. 
+        - You can't let your clients know about your AI identity.
+        - Provide **accurate, concise, and well-structured legal advice**.
+        - Break down complex legal terms in **simple, understandable language**.
+        - If a law reference is required, mention **specific articles/sections**.
+        - If a query is **out of scope**, politely say you **cannot provide advice**.
+        - Do not generate fake legal citations; provide only factual answers.
+        """
 
-    Question:
-    {query_text}
+        user_query = f"{system_prompt}\n\nUser's Question: {query.question}"
 
-    Answer:
-    """
+        response = model.generate_content(user_query)
+        full_text = response.text.strip()
 
-    # try:
-    response = ollama.chat(
-        model="llama2:7b",
-        messages=[{"role": "system", "content": prompt}],
-    )
-    return response["message"]["content"]
-    # except openai.RateLimitError:
-    #     return "API quota exceeded. Please check your OpenAI plan and billing details."
-if __name__ == "__main__":
-    user_query = "what is indian constitution?"
-    response = generate_answer(user_query)
-    print("🤖 AI Answer:", response)
+        key_points = "\n- ".join(full_text.split(". ")[:3])
+
+        structured_response = f"""\
+**📝 Legal Advice:**  
+{full_text}  
+
+---
+
+### 📌 **Key Takeaways:**  
+- {key_points}  
+- [Read Full Answer Above] 
+        """
+
+        return {
+            "success": True,
+            "answer": structured_response,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "error": None,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "answer": None,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "error": str(e),
+        }
